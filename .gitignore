@@ -1,0 +1,21 @@
+# State files
+bot_state.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data directories
+user_data/
+escrow_deals/
+logs/
+group_data/
+recovery_data/
+gift_codes/
+crypto_prices.json
+
+# Virtual environment
+venv/
+env/
