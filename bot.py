@@ -3200,6 +3200,14 @@ async def dice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await ensure_user_in_wallets(user.id, user.username, context=context)
     
+    # Check if arguments are provided (PvP format: /dice @username amount MX ftY)
+    message_text = update.message.text.strip().split()
+    if len(message_text) > 1:
+        # Arguments provided, treat as PvP command
+        await generic_emoji_game_command(update, context, "dice")
+        return
+    
+    # No arguments, show inline buttons for game mode selection
     keyboard = [
         [InlineKeyboardButton(f"🤖 Play vs Bot", callback_data=f"pvb_start_dice_bot")],
         [InlineKeyboardButton(f"👤 Play vs Player", callback_data=f"pvp_info_dice_bot")],
@@ -3218,6 +3226,14 @@ async def darts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await ensure_user_in_wallets(user.id, user.username, context=context)
     
+    # Check if arguments are provided (PvP format: /darts @username amount MX ftY)
+    message_text = update.message.text.strip().split()
+    if len(message_text) > 1:
+        # Arguments provided, treat as PvP command
+        await generic_emoji_game_command(update, context, "darts")
+        return
+    
+    # No arguments, show inline buttons for game mode selection
     keyboard = [
         [InlineKeyboardButton(f"🤖 Play vs Bot", callback_data=f"pvb_start_darts")],
         [InlineKeyboardButton(f"👤 Play vs Player", callback_data=f"pvp_info_darts")],
@@ -3236,6 +3252,14 @@ async def football_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await ensure_user_in_wallets(user.id, user.username, context=context)
     
+    # Check if arguments are provided (PvP format: /goal @username amount MX ftY)
+    message_text = update.message.text.strip().split()
+    if len(message_text) > 1:
+        # Arguments provided, treat as PvP command
+        await generic_emoji_game_command(update, context, "goal")
+        return
+    
+    # No arguments, show inline buttons for game mode selection
     keyboard = [
         [InlineKeyboardButton(f"🤖 Play vs Bot", callback_data=f"pvb_start_football")],
         [InlineKeyboardButton(f"👤 Play vs Player", callback_data=f"pvp_info_football")],
@@ -3254,6 +3278,14 @@ async def bowling_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await ensure_user_in_wallets(user.id, user.username, context=context)
     
+    # Check if arguments are provided (PvP format: /bowl @username amount MX ftY)
+    message_text = update.message.text.strip().split()
+    if len(message_text) > 1:
+        # Arguments provided, treat as PvP command
+        await generic_emoji_game_command(update, context, "bowl")
+        return
+    
+    # No arguments, show inline buttons for game mode selection
     keyboard = [
         [InlineKeyboardButton(f"🤖 Play vs Bot", callback_data=f"pvb_start_bowling")],
         [InlineKeyboardButton(f"👤 Play vs Player", callback_data=f"pvp_info_bowling")],
