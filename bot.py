@@ -8262,26 +8262,6 @@ async def set_daily_bonus_step(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
     # --- FIX ENDS HERE ---
 
-async def admin_search_user_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != BOT_OWNER_ID: return ConversationHandler.END
-    username_or_id = update.message.text
-    target_user_id = None
-
-    if username_or_id.isdigit():
-        target_user_id = int(username_or_id)
-    else:
-        target_user_id = username_to_userid.get(normalize_username(username_or_id))
-
-    if not target_user_id or target_user_id not in user_stats:
-        await update.message.reply_text("User not found. Please try again.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="admin_dashboard")]]))
-        return ADMIN_SEARCH_USER
-
-    context.user_data['admin_search_target'] = target_user_id
-    await display_admin_user_panel(update, context, target_user_id)
-    # --- FIX STARTS HERE ---
-    return ConversationHandler.END
-    # --- FIX ENDS HERE ---
-
 async def admin_broadcast_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != BOT_OWNER_ID: return ConversationHandler.END
     message_text = update.message.text
