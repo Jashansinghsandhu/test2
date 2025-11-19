@@ -806,6 +806,74 @@ async def ensure_user_in_wallets(user_id: int, username: str = None, referrer_id
 
     return True
 
+def get_locked_balance_in_games(user_id: int) -> dict:
+    """
+    Calculate total locked balance in active games and provide breakdown by game type.
+    Returns dict with 'total' and 'games' (list of game details)
+    """
+    locked_total = 0.0
+    game_breakdown = []
+    
+    for game_id, game in game_sessions.items():
+        if game.get('user_id') == user_id and game.get('status') == 'active':
+            bet_amount = game.get('bet_amount', 0.0)
+            game_type = game.get('game_type', 'unknown')
+            locked_total += bet_amount
+            game_breakdown.append({
+                'game_id': game_id,
+                'game_type': game_type,
+                'amount': bet_amount
+            })
+    
+    return {'total': locked_total, 'games': game_breakdown}
+
+async def send_insufficient_balance_message(update: Update, message: str = None):
+    """
+    Send an insufficient balance message with a deposit button.
+    Can be used with update.message or update.callback_query.
+    """
+    if message is None:
+        message = "❌ You don't have enough balance. Please deposit to continue playing."
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📥 Deposit", callback_data="main_deposit")]
+    ])
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+
+def format_balance_with_locked(user_id: int, currency: str = "USD") -> str:
+    """
+    Format balance including locked funds in active games.
+    Returns formatted string like "10.50$ + { 5.00$ in game ( mines ) }"
+    """
+    balance_usd = user_wallets.get(user_id, 0.0)
+    formatted_balance = format_currency(balance_usd, currency)
+    
+    locked_info = get_locked_balance_in_games(user_id)
+    
+    if locked_info['total'] > 0:
+        # Group by game type for cleaner display
+        game_totals = {}
+        for game in locked_info['games']:
+            game_type = game['game_type']
+            if game_type not in game_totals:
+                game_totals[game_type] = 0.0
+            game_totals[game_type] += game['amount']
+        
+        # Format locked balance display
+        locked_parts = []
+        for game_type, amount in game_totals.items():
+            formatted_locked = format_currency(amount, currency)
+            locked_parts.append(f"{formatted_locked} in game ( {game_type} )")
+        
+        locked_str = " + ".join(locked_parts)
+        return f"{formatted_balance} + {{ {locked_str} }}"
+    
+    return formatted_balance
+
 ## NEW FEATURE - Achievement System ##
 async def check_and_award_achievements(user_id, context, multiplier=0):
     if user_id not in user_stats:
@@ -1045,7 +1113,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Get user's preferred currency
     user_currency = get_user_currency(user.id)
-    formatted_balance = format_currency(user_wallets.get(user.id, 0.0), user_currency)
+    formatted_balance = format_balance_with_locked(user.id, user_currency)
 
     # NEW UI STRUCTURE - Simplified and reorganized
     keyboard = [
@@ -1862,7 +1930,7 @@ async def blackjack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_wallets.get(user.id, 0.0) < bet_amount_usd:
-        await update.message.reply_text(f"You don't have enough balance. Your balance: {formatted_balance}")
+        await send_insufficient_balance_message(update, f"❌ You don't have enough balance. Your balance: {formatted_balance}")
         return
 
     user_wallets[user.id] -= bet_amount_usd
@@ -2044,7 +2112,21 @@ async def blackjack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif action == "double":
         if user_wallets.get(user.id, 0.0) < game["bet_amount"]:
-            await query.answer("Not enough balance to double down!", show_alert=True)
+            # Show alert with deposit option
+            await query.answer("❌ Not enough balance to double down!", show_alert=True)
+            # Edit message to show deposit button
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📥 Deposit", callback_data="main_deposit")],
+                [InlineKeyboardButton("🔙 Back to Game", callback_data=f"bj_continue_{game_id}")]
+            ])
+            await query.edit_message_text(
+                f"❌ You don't have enough balance to double down.\n\n"
+                f"Required: ${game['bet_amount']:.2f}\n"
+                f"Your balance: ${user_wallets.get(user.id, 0.0):.2f}\n\n"
+                f"Please deposit to continue.",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
             return
 
         user_wallets[user.id] -= game["bet_amount"]
@@ -2142,7 +2224,7 @@ async def coin_flip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_wallets.get(user.id, 0.0) < bet:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
 
     user_wallets[user.id] -= bet
@@ -2350,7 +2432,7 @@ async def highlow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     user_wallets[user.id] -= bet
@@ -2663,7 +2745,7 @@ async def roulette_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
 
     valid_numbers = list(range(0, 37))
@@ -2753,7 +2835,7 @@ async def dice_roll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
 
     valid_numbers = ['1', '2', '3', '4', '5', '6']
@@ -2837,7 +2919,11 @@ async def tower_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SELECT_BET_AMOUNT
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance. Please enter a lower amount or cancel.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel_game")]]))
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📥 Deposit", callback_data="main_deposit")],
+            [InlineKeyboardButton("Cancel", callback_data="cancel_game")]
+        ])
+        await update.message.reply_text("❌ You don't have enough balance. Please deposit or enter a lower amount.", reply_markup=keyboard)
         return SELECT_BET_AMOUNT
 
     user_wallets[user.id] -= bet_amount
@@ -3067,7 +3153,7 @@ async def slots_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
 
     user_wallets[user.id] -= bet_amount
@@ -3293,7 +3379,7 @@ async def predict_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
 
     user_wallets[user.id] -= bet_amount
@@ -3394,7 +3480,7 @@ async def limbo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     # Deduct bet
@@ -3545,7 +3631,7 @@ async def keno_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     # Create game session
@@ -3794,7 +3880,7 @@ async def crash_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     # Deduct bet
@@ -3893,7 +3979,7 @@ async def plinko_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     # Deduct bet
@@ -3961,7 +4047,7 @@ async def wheel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     # Deduct bet
@@ -4030,7 +4116,7 @@ async def scratch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     # Deduct bet
@@ -4114,7 +4200,7 @@ async def coinchain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
     
     # Create game session
@@ -4290,7 +4376,11 @@ async def mines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SELECT_BET_AMOUNT
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance. Please enter a lower amount or cancel.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel_game")]]))
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📥 Deposit", callback_data="main_deposit")],
+            [InlineKeyboardButton("Cancel", callback_data="cancel_game")]
+        ])
+        await update.message.reply_text("❌ You don't have enough balance. Please deposit or enter a lower amount.", reply_markup=keyboard)
         return SELECT_BET_AMOUNT
 
     total_cells = 25
@@ -4762,7 +4852,7 @@ async def generic_emoji_game_command(update: Update, context: ContextTypes.DEFAU
         return
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance.")
+        await send_insufficient_balance_message(update)
         return
 
     opponent_id = username_to_userid.get(opponent_username)
@@ -4920,9 +5010,8 @@ async def start_pvb_conversation_after_setup(query, context):
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await ensure_user_in_wallets(user.id, user.username, context=context)
-    balance = user_wallets.get(user.id, 0.0)
     user_currency = get_user_currency(user.id)
-    formatted_balance = format_currency(balance, user_currency)
+    formatted_balance = format_balance_with_locked(user.id, user_currency)
     
     keyboard = [
         [InlineKeyboardButton("💰 Deposit", callback_data="main_deposit"),
@@ -5864,7 +5953,11 @@ async def match_invite_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if data.startswith("accept_"):
         await ensure_user_in_wallets(user_id, query.from_user.username, context=context)
         if user_wallets.get(user_id, 0.0) < match_data["bet_amount"]:
-            await query.edit_message_text("You don't have enough balance for this bet. Match cancelled.")
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📥 Deposit", callback_data="main_deposit")]])
+            await query.edit_message_text(
+                "❌ You don't have enough balance for this bet. Please deposit to continue.",
+                reply_markup=keyboard
+            )
             match_data["status"] = "cancelled"
             return
 
@@ -6827,17 +6920,6 @@ async def handle_escrow_conversation(update: Update, context: ContextTypes.DEFAU
         # REMOVED: ask_partner_method step. Forcing link creation.
         await create_and_finalize_escrow_deal(update, context, by_link=True)
 
-    elif step == 'ask_withdrawal_address':
-        address = update.message.text
-        deal_id = context.user_data.pop('escrow_withdrawal_deal_id')
-        if not Web3.is_address(address):
-            await update.message.reply_text("That is not a valid BEP-20 address. Please try again.")
-            context.user_data['escrow_withdrawal_deal_id'] = deal_id
-            return
-        escrow_deals[deal_id]['buyer']['withdrawal_address'] = address
-        context.user_data.pop('escrow_step', None)
-        await release_escrow_funds(update, context, deal_id)
-
 @check_maintenance
 async def escrow_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
@@ -6900,10 +6982,40 @@ async def escrow_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text("⚠️ Are you sure you want to release the funds to the buyer? This action is irreversible.", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
         elif decision == 'releaseconfirm':
             if user.id != deal['seller']['id']: return
-            await query.edit_message_text("Action confirmed. Asking buyer for their withdrawal address.")
-            context.user_data['escrow_step'] = 'ask_withdrawal_address'
-            context.user_data['escrow_withdrawal_deal_id'] = deal_id
-            await context.bot.send_message(chat_id=deal['buyer']['id'], text="The seller released the funds! Please provide your BEP-20 (BSC) wallet address to receive payment.")
+            # NEW: Credit buyer's casino balance directly instead of asking for withdrawal address
+            buyer_id = deal['buyer']['id']
+            amount = deal['amount']
+            
+            # Add funds to buyer's casino balance
+            await ensure_user_in_wallets(buyer_id, context=context)
+            user_wallets[buyer_id] += amount
+            save_user_data(buyer_id)
+            
+            # Update deal status
+            deal['status'] = 'completed'
+            deal['completed_at'] = str(datetime.now(timezone.utc))
+            save_escrow_deal(deal_id)
+            
+            # Notify both parties
+            seller_msg = (
+                f"✅ <b>Deal Completed!</b>\n\n"
+                f"<b>Deal ID:</b> <code>{deal_id}</code>\n"
+                f"<b>Amount:</b> ${amount:.2f}\n\n"
+                f"The funds have been credited to the buyer's casino balance.\n"
+                f"Thank you for using our escrow service!"
+            )
+            buyer_msg = (
+                f"✅ <b>Funds Received!</b>\n\n"
+                f"<b>Deal ID:</b> <code>{deal_id}</code>\n"
+                f"<b>Amount:</b> ${amount:.2f}\n\n"
+                f"The funds have been added to your casino balance.\n"
+                f"You can now withdraw them using the withdrawal feature.\n\n"
+                f"Use /withdraw to request a withdrawal."
+            )
+            
+            await query.edit_message_text(seller_msg, parse_mode=ParseMode.HTML)
+            await context.bot.send_message(chat_id=buyer_id, text=buyer_msg, parse_mode=ParseMode.HTML)
+            
         elif decision == 'releasecancel': await query.edit_message_text("Release cancelled.")
         elif decision == 'dispute':
             deal['status'] = 'disputed'; save_escrow_deal(deal_id)
@@ -9584,7 +9696,11 @@ async def pvb_get_bet_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return SELECT_BET_AMOUNT
 
     if user_wallets.get(user.id, 0.0) < bet_amount:
-        await update.message.reply_text("You don't have enough balance. Please enter a lower amount.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel_game")]]))
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📥 Deposit", callback_data="main_deposit")],
+            [InlineKeyboardButton("Cancel", callback_data="cancel_game")]
+        ])
+        await update.message.reply_text("❌ You don't have enough balance. Please deposit or enter a lower amount.", reply_markup=keyboard)
         return SELECT_BET_AMOUNT
 
     context.user_data['bet_amount'] = bet_amount
